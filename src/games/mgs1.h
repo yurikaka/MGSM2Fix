@@ -247,6 +247,9 @@ public:
     static void AnalogLoop();
 
 private:
+    // Resolved when the guest memory definition changes. Font rendering must
+    // not call back into Squirrel for every glyph.
+    std::vector<CompatibilityRule> MGS1_FontExclusions;
     uintptr_t MGS1_GlobalsPTR = 0;
     uintptr_t MGS1_LoaderPTR = 0;
     uintptr_t MGS1_LanguagePTR = 0;

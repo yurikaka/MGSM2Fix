@@ -49,7 +49,16 @@ int MGS1::MGS1_font(M2_EmuR3000 *cpu, int cycle, unsigned int address)
         spdlog::info("[MGS 1] {} high resolution font system.", M2Config::bPatchesDisableFont ? "Blocking" : "Allowing");
         oneshot = true;
     }
-    if (!M2Config::bPatchesDisableFont) {
+    bool partialBlock = false;
+    if (M2Config::bPatchesPartialDisableFont) {
+        for (const auto &rule : GetInstance().MGS1_FontExclusions) {
+            if (rule.overlaps(address & 0x1fffff, 1)) {
+                partialBlock = true;
+                break;
+            }
+        }
+    }
+    if (!M2Config::bPatchesDisableFont && !partialBlock) {
         PSXFUNCTION font = PSX::UserHandler(cpu, address);
         return font(cpu, cycle, address);
     }
@@ -65,6 +74,16 @@ SQInteger MGS1::SQReturn_set_playside_mgs(HSQUIRRELVM<Squirk::Standard> v)
 
 void MGS1::SQOnMemoryDefine()
 {
+    MGS1_FontExclusions.clear();
+    if (M2Config::bPatchesPartialDisableFont) {
+        auto title = SQGlobals<Squirk::Standard>::GetTitle();
+        auto version = SQSystemData<Squirk::Standard>::SettingETC::GetVersion();
+        auto disk = SQGlobals<Squirk::Standard>::GetDisk();
+        for (const auto &rule : M2Config::ChineseCompatibility.font) {
+            if (rule.title == title && rule.version == version && rule.disk == disk)
+                MGS1_FontExclusions.push_back(rule);
+        }
+    }
     MGS1_GlobalsPTR = SQTitleProf<Squirk::Standard>::GetMemoryDefine("scene_name");
     spdlog::info("[MGS 1] mgs_stage is 0x{:x}.", MGS1_GlobalsPTR);
 

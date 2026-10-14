@@ -389,6 +389,9 @@
     <ClInclude Include="src\m2fix\m2config.h">
       <Filter>M2Fix</Filter>
     </ClInclude>
+    <ClInclude Include="src\m2fix\compat_policy.h">
+      <Filter>M2Fix</Filter>
+    </ClInclude>
     <ClInclude Include="src\bindings\sqbinary.h">
       <Filter>Bindings</Filter>
     </ClInclude>

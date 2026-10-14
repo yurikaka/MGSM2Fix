@@ -104,6 +104,54 @@ void M2Config::Load()
 
     inipp::get_value(ini.sections["Patches"], "DisableFont", bPatchesDisableFont);
 
+    inipp::get_value(ini.sections["Patches"], "PartialDisableRAM", bPatchesPartialDisableRAM);
+    inipp::get_value(ini.sections["Patches"], "PartialDisableCDROM", bPatchesPartialDisableCDROM);
+    inipp::get_value(ini.sections["Patches"], "PartialDisableFont", bPatchesPartialDisableFont);
+    ChineseCompatibility = {};
+    if (bPatchesPartialDisableRAM || bPatchesPartialDisableCDROM || bPatchesPartialDisableFont) {
+        std::string manifest = "mods/cn-compat/manifest.json";
+        inipp::get_value(ini.sections["Patches"], "CompatibilityManifest", manifest);
+        try {
+            std::ifstream input(base / std::filesystem::u8path(manifest));
+            if (!input) throw std::runtime_error("cannot open compatibility manifest");
+            json document;
+            input >> document;
+            if (document.at("schema").get<unsigned>() != 1)
+                throw std::runtime_error("unsupported compatibility manifest schema");
+            CompatibilityPolicy loaded;
+            auto read = [&](const char *key, std::vector<CompatibilityRule> &target) {
+                for (const auto &entry : document.at(key)) {
+                    CompatibilityRule rule;
+                    rule.title = entry.at("title").get<unsigned>();
+                    rule.version = entry.at("version").get<std::string>();
+                    rule.disk = entry.at("disk").get<unsigned>();
+                    rule.start = entry.at("start").get<uint64_t>();
+                    rule.end = entry.at("end").get<uint64_t>();
+                    if (rule.start >= rule.end || rule.version.empty())
+                        throw std::runtime_error("invalid compatibility range");
+                    target.push_back(std::move(rule));
+                }
+            };
+            read("ram", loaded.ram);
+            read("cd", loaded.cd);
+            read("font", loaded.font);
+            read("texture", loaded.texture);
+            ChineseCompatibility = std::move(loaded);
+            spdlog::info("[Config] Compatibility policy: {} RAM, {} CD, {} font, {} texture ranges.",
+                ChineseCompatibility.ram.size(), ChineseCompatibility.cd.size(),
+                ChineseCompatibility.font.size(), ChineseCompatibility.texture.size());
+        }
+        catch (const std::exception &error) {
+            // An absent/broken profile must not silently turn every official
+            // patch back on while a translation is relying on exclusions.
+            spdlog::error("[Config] {}: {}. Using full disable for requested partial categories.", manifest, error.what());
+            bPatchesDisableRAM |= bPatchesPartialDisableRAM;
+            bPatchesDisableCDROM |= bPatchesPartialDisableCDROM;
+            bPatchesDisableFont |= bPatchesPartialDisableFont;
+            bPatchesPartialDisableRAM = bPatchesPartialDisableCDROM = bPatchesPartialDisableFont = false;
+        }
+    }
+
     inipp::get_value(ini.sections["Patches"], "RemoveUnderpants", bPatchesRemoveUnderpants);
     inipp::get_value(ini.sections["Patches"], "EnableMosaic", bPatchesEnableMosaic);
     inipp::get_value(ini.sections["Patches"], "RestoreGhosts", bPatchesRestoreGhosts);

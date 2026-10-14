@@ -3,6 +3,7 @@
 #include "stdafx.h"
 
 #include "m2fixbase.h"
+#include "compat_policy.h"
 
 // What to do about the collection's replacement for MGS1's Option -> SCREEN
 // help texture. See [Patches] BrightnessText in the ini.
@@ -82,6 +83,10 @@ public:
     static inline bool bPatchesGrenadeDelay = true;
     static inline std::vector<int> vGameGiveItems;
     static inline std::vector<int> vGameGiveWeapons;
+    static inline bool bPatchesPartialDisableRAM = false;
+    static inline bool bPatchesPartialDisableCDROM = false;
+    static inline bool bPatchesPartialDisableFont = false;
+    static inline CompatibilityPolicy ChineseCompatibility;
     static inline bool bPatchesDisableRAM;
     static inline bool bPatchesDisableCDROM;
     static inline bool bPatchesDisableFont;

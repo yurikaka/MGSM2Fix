@@ -594,6 +594,12 @@ SQInteger SQHook<Q>::SQNative_setRamValue(HSQUIRRELVM<Q> v)
         }
         ret = 1;
     }
+    else if (M2Config::bPatchesPartialDisableRAM && CompatibilityPolicy::blocks(
+        M2Config::ChineseCompatibility.ram, SQGlobals<Q>::GetTitle(),
+        SQSystemData<Q>::SettingETC::GetVersion(), SQGlobals<Q>::GetDisk(), offset,
+        (width + 7) / 8)) {
+        ret = 1;
+    }
 
     if (length != 0 && ++index == length) {
         address = 0;
@@ -629,6 +635,19 @@ SQInteger SQHook<Q>::SQNative_entryCdRomPatch(HSQUIRRELVM<Q> v)
     if (M2Config::bPatchesDisableCDROM && !buffer.empty()) {
         spdlog::info("[SQ] [Patch] filtering CD-ROM patch offset 0x{:x}.", offset);
         return 1;
+    }
+    if (M2Config::bPatchesPartialDisableCDROM) {
+        uint64_t size = buffer.size();
+        if (data.GetType() == OT_INSTANCE) {
+            SQBinary<Q> binary(data.GetObject());
+            size = binary.Size();
+        }
+        if (CompatibilityPolicy::blocks(M2Config::ChineseCompatibility.cd,
+            SQGlobals<Q>::GetTitle(), SQSystemData<Q>::SettingETC::GetVersion(),
+            SQGlobals<Q>::GetDisk(), offset, size)) {
+            spdlog::info("[SQ] [Patch] compatibility filter: CD 0x{:x}, {} bytes, {}.", offset, size, file);
+            return 1;
+        }
     }
 
     // Watches first: a watch is a report, and must see the patch whether or
@@ -695,6 +714,13 @@ template <Squirk Q>
 SQInteger SQHook<Q>::SQNative_entryTexturePatch(HSQUIRRELVM<Q> v)
 {
     unsigned id = SQHelper<Q>::GetObject(2).Cast<unsigned>();
+
+    if (M2Config::bPatchesPartialDisableFont && CompatibilityPolicy::blocks(
+        M2Config::ChineseCompatibility.texture, SQGlobals<Q>::GetTitle(),
+        SQSystemData<Q>::SettingETC::GetVersion(), SQGlobals<Q>::GetDisk(), id)) {
+        spdlog::info("[SQ] [Patch] compatibility filter: texture 0x{:x}.", id);
+        return 1;
+    }
 
     if (TextureWhitelist.empty()) return 0;
     for (auto &filter : TextureWhitelist)
