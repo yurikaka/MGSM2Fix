@@ -103,6 +103,12 @@ void M2Config::Load()
     inipp::get_value(ini.sections["Patches"], "DisableCDROM", bPatchesDisableCDROM);
 
     inipp::get_value(ini.sections["Patches"], "DisableFont", bPatchesDisableFont);
+    // Legacy keys remain readable; explicitly supplied external keys take precedence.
+    inipp::get_value(ini.sections["Patches"], "ChineseHDFont", bPatchesExternalHDFont);
+    inipp::get_value(ini.sections["Patches"], "ChineseHDFontDirectory", sExternalHDFontDirectory);
+    inipp::get_value(ini.sections["Patches"], "ExternalHDFont", bPatchesExternalHDFont);
+    inipp::get_value(ini.sections["Patches"], "ExternalHDFontDirectory", sExternalHDFontDirectory);
+    bExternalHDFontUnavailable = false;
 
     inipp::get_value(ini.sections["Patches"], "PartialDisableRAM", bPatchesPartialDisableRAM);
     inipp::get_value(ini.sections["Patches"], "PartialDisableCDROM", bPatchesPartialDisableCDROM);

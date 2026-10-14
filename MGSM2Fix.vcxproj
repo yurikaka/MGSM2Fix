@@ -256,6 +256,7 @@
     <ClInclude Include="src\extern\squirrel\squirrel\sqvm.h" />
     <ClInclude Include="src\m2fix\m2config.h" />
     <ClInclude Include="src\m2fix\compat_policy.h" />
+    <ClInclude Include="src\m2fix\external_hd_font.h" />
     <ClInclude Include="src\m2fix\m2fix.h" />
     <ClInclude Include="src\m2fix\m2hook.h" />
     <ClInclude Include="src\m2fix\m2utils.h" />

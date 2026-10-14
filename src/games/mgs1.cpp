@@ -58,7 +58,7 @@ int MGS1::MGS1_font(M2_EmuR3000 *cpu, int cycle, unsigned int address)
             }
         }
     }
-    if (!M2Config::bPatchesDisableFont && !partialBlock) {
+    if (!M2Config::bPatchesDisableFont && !partialBlock && !M2Config::bExternalHDFontUnavailable) {
         PSXFUNCTION font = PSX::UserHandler(cpu, address);
         return font(cpu, cycle, address);
     }

@@ -86,6 +86,9 @@ public:
     static inline bool bPatchesPartialDisableRAM = false;
     static inline bool bPatchesPartialDisableCDROM = false;
     static inline bool bPatchesPartialDisableFont = false;
+    static inline bool bPatchesExternalHDFont = false;
+    static inline std::string sExternalHDFontDirectory = "mods/hd-fonts";
+    static inline bool bExternalHDFontUnavailable = false;
     static inline CompatibilityPolicy ChineseCompatibility;
     static inline bool bPatchesDisableRAM;
     static inline bool bPatchesDisableCDROM;

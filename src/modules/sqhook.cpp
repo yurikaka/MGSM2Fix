@@ -12,6 +12,7 @@
 
 #include "m2/epi.h"
 #include "ketchup.h"
+#include "external_hd_font.h"
 
 template <Squirk Q>
 std::vector<std::pair<std::string, SQFUNCTION<Q>>> SQHook<Q>::CallTable = {
@@ -954,6 +955,56 @@ SQInteger SQHook<Q>::HookNative(HSQUIRRELVM<Q> v)
     }
 
     if (FixNative(v, func, closure, name)) {
+        if (M2Config::bPatchesExternalHDFont && name && strcmp(name, "entryMGSFontData") == 0) {
+            const auto version = SQSystemData<Q>::SettingETC::GetVersion();
+            if (SQGlobals<Q>::GetTitle() != 99 || (version != "INTEGRAL" && version != "VR-DISK")) {
+                M2Config::bExternalHDFontUnavailable = false;
+                return func(v);
+            }
+            const unsigned type = SQHelper<Q>::GetObject(2, v).Cast<unsigned>();
+            if (type != 0 && type != 1 && type != 4) return func(v);
+#ifdef _WIN64
+            static const unsigned char reader[] = {
+                0x8b,0x42,0x58,0x44,0x8b,0xcb,0x48,0x8b,0x8f,0xb0,0x01,0x00,0x00,
+                0x41,0xb8,0x0e,0x00,0x01,0x00,0x89,0x44,0x24,0x28,0x48,0x8b,0x42,
+                0x50,0x48,0x89,0x44,0x24,0x20
+            };
+            const auto *base = reinterpret_cast<const unsigned char *>(GetModuleHandle(nullptr));
+            const auto *dos = reinterpret_cast<const IMAGE_DOS_HEADER *>(base);
+            const auto *nt = reinterpret_cast<const IMAGE_NT_HEADERS64 *>(base + dos->e_lfanew);
+            if (nt->OptionalHeader.SizeOfImage > 0x2b077 + sizeof(reader)
+                && std::memcmp(base + 0x2b077, reader, sizeof(reader)) == 0) {
+                SQUserPointer binary = nullptr;
+                const std::vector<std::uint8_t> *font = nullptr;
+                try {
+                    const auto directory = M2Hook::GetInstance(".").ModuleLocation().parent_path()
+                        / std::filesystem::u8path(M2Config::sExternalHDFontDirectory);
+                    static std::map<std::pair<std::filesystem::path, std::string>, ExternalHDFontSet> cache;
+                    const auto key = std::make_pair(directory, version);
+                    auto it = cache.find(key);
+                    if (it == cache.end()) it = cache.emplace(key, ExternalHDFontSet::Load(directory, version)).first;
+                    if (SQ_FAILED(sq_getinstanceup(v, 3, &binary, nullptr)) || !binary)
+                        throw std::runtime_error("native font argument is not a Binary instance");
+                    std::uint32_t originalSize = 0;
+                    std::memcpy(&originalSize, static_cast<unsigned char *>(binary) + 0x58, sizeof(originalSize));
+                    if (SQBinary<Q>(SQHelper<Q>::GetObject(3, v).GetObject()).Size() != originalSize)
+                        throw std::runtime_error("native Binary size disagrees with the verified layout");
+                    font = it->second.ForType(type);
+                } catch (const std::exception &error) {
+                    spdlog::error("[SQ] External HD font: {}. Using guest font rendering.", error.what());
+                }
+                if (font) {
+                    M2Config::bExternalHDFontUnavailable = false;
+                    ScopedExternalFontBuffer replacement(binary, *font);
+                    spdlog::info("[SQ] External HD font registration: {}, type {} (runtime only).", version, type);
+                    return func(v);
+                }
+            } else spdlog::error("[SQ] Unsupported native font Binary reader; using guest font rendering.");
+#else
+            spdlog::error("[SQ] External HD runtime font registration requires the audited x64 game.");
+#endif
+            M2Config::bExternalHDFontUnavailable = true;
+        }
         return func(v);
     }
 
