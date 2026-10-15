@@ -13,6 +13,7 @@
 #include "m2/epi.h"
 #include "ketchup.h"
 #include "external_hd_font.h"
+#include "external_textures.h"
 
 template <Squirk Q>
 std::vector<std::pair<std::string, SQFUNCTION<Q>>> SQHook<Q>::CallTable = {
@@ -955,6 +956,51 @@ SQInteger SQHook<Q>::HookNative(HSQUIRRELVM<Q> v)
     }
 
     if (FixNative(v, func, closure, name)) {
+        if (M2Config::bExternalHDTextures && name && strcmp(name, "entryTexturePatch") == 0) {
+#ifdef _WIN64
+            // entryTexturePatch has a different argument layout from fonts.
+            // Guard its own audited Binary reader before borrowing its buffer.
+            static const unsigned char reader[] = {
+                0x8b,0x42,0x58,0x44,0x8b,0xce,0x48,0x8b,0x8d,0xb0,0x01,0x00,0x00,
+                0x41,0xb8,0x0b,0x00,0x01,0x00
+            };
+            const auto *base = reinterpret_cast<const unsigned char *>(GetModuleHandle(nullptr));
+            const auto *dos = reinterpret_cast<const IMAGE_DOS_HEADER *>(base);
+            const auto *nt = reinterpret_cast<const IMAGE_NT_HEADERS64 *>(base + dos->e_lfanew);
+            const std::vector<std::uint8_t> *texture = nullptr;
+            SQUserPointer binary = nullptr;
+            try {
+                if (nt->OptionalHeader.SizeOfImage <= 0x2af7f + sizeof(reader)
+                    || std::memcmp(base + 0x2af7f, reader, sizeof(reader)) != 0)
+                    throw std::runtime_error("unsupported native texture Binary reader");
+                const auto path = M2Hook::GetInstance(".").ModuleLocation().parent_path()
+                    / std::filesystem::u8path(M2Config::sExternalHDTextureManifest);
+                static std::map<std::filesystem::path, ExternalTextureSet> cache;
+                auto it = cache.find(path);
+                if (it == cache.end()) it = cache.emplace(path, ExternalTextureSet::Load(path)).first;
+                const auto id = SQHelper<Q>::GetObject(2, v).Cast<unsigned>();
+                const auto type = SQHelper<Q>::GetObject(3, v).Cast<int>();
+                const auto stage = SQHelper<Q>::GetObject(4, v).Cast<int>();
+                texture = it->second.Find(SQGlobals<Q>::GetTitle(), SQSystemData<Q>::SettingETC::GetVersion(), id, type, stage);
+                if (texture) {
+                    if (SQ_FAILED(sq_getinstanceup(v, 5, &binary, nullptr)) || !binary)
+                        throw std::runtime_error("texture argument is not a Binary instance");
+                    std::uint32_t size = 0;
+                    std::memcpy(&size, static_cast<unsigned char *>(binary) + 0x58, sizeof(size));
+                    if (SQBinary<Q>(SQHelper<Q>::GetObject(5, v).GetObject()).Size() != size)
+                        throw std::runtime_error("texture Binary size disagrees with verified layout");
+                    spdlog::info("[SQ] External HD texture: 0x{:04x}, {} bytes.", id, texture->size());
+                }
+            } catch (const std::exception &error) {
+                texture = nullptr;
+                spdlog::error("[SQ] External HD texture: {}. Using original resource.", error.what());
+            }
+            if (texture) {
+                ScopedExternalFontBuffer replacement(binary, *texture);
+                return func(v);
+            }
+#endif
+        }
         if (M2Config::bPatchesExternalHDFont && name && strcmp(name, "entryMGSFontData") == 0) {
             const auto version = SQSystemData<Q>::SettingETC::GetVersion();
             if (SQGlobals<Q>::GetTitle() != 99 || (version != "INTEGRAL" && version != "VR-DISK")) {

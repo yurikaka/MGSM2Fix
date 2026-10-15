@@ -109,6 +109,8 @@ void M2Config::Load()
     inipp::get_value(ini.sections["Patches"], "ExternalHDFont", bPatchesExternalHDFont);
     inipp::get_value(ini.sections["Patches"], "ExternalHDFontDirectory", sExternalHDFontDirectory);
     bExternalHDFontUnavailable = false;
+    inipp::get_value(ini.sections["Patches"], "ExternalHDTextures", bExternalHDTextures);
+    inipp::get_value(ini.sections["Patches"], "ExternalHDTextureManifest", sExternalHDTextureManifest);
 
     inipp::get_value(ini.sections["Patches"], "PartialDisableRAM", bPatchesPartialDisableRAM);
     inipp::get_value(ini.sections["Patches"], "PartialDisableCDROM", bPatchesPartialDisableCDROM);
