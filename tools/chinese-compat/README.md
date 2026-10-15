@@ -30,7 +30,7 @@ The external font loader is language-neutral. Its audited runtime support remain
 limited to MGS1 INTEGRAL and VR-DISK on x64. Place each release's resources in
 `<ExternalHDFontDirectory>/INTEGRAL/` or
 `<ExternalHDFontDirectory>/VR-DISK/`, using these filenames:
-`hankaku_4x.bin`, `kanji_4x.bin`, and `fontall.bin`.
+`hankaku_4x.bin`, `kanji_4x.bin`, `fontall.bin`, and optional `bank0.bin`.
 The formats and glyph-matching rules are unchanged. The translation-specific
 tools below still generate Chinese resources, which are one use of this loader.
 

@@ -15,6 +15,31 @@
 #include "external_hd_font.h"
 #include "external_textures.h"
 
+#ifdef _WIN64
+// Change only the live reader, after validating the selected external font.
+// Switching back to retail fonts restores the original instruction bytes.
+static bool SetExternalFixedBankMapping(unsigned first, bool linear) {
+    static const std::array<unsigned char, 12> original{
+        0x48,0x8d,0x0d,0xeb,0x5a,0x66,0x00,0x46,0x0f,0xb7,0x04,0x41};
+    static auto current = original;
+    auto desired = original;
+    if (linear) {
+        desired = {0x41,0x81,0xc0,0,0,0,0,0x90,0x90,0x90,0x90,0x90};
+        std::memcpy(desired.data()+3, &first, 4);
+    }
+    auto *base = reinterpret_cast<unsigned char *>(GetModuleHandle(nullptr));
+    const auto *dos = reinterpret_cast<const IMAGE_DOS_HEADER *>(base);
+    const auto *nt = reinterpret_cast<const IMAGE_NT_HEADERS64 *>(base + dos->e_lfanew);
+    if (nt->OptionalHeader.SizeOfImage <= 0x107ebe + original.size()
+        || std::memcmp(base+0x107ebe, current.data(), current.size()) != 0) return false;
+    if (desired != current) {
+        M2Hook::GetInstance().Patch(base+0x107ebe, desired.data(), desired.size(), "External HD fixed-bank mapping");
+        current = desired;
+    }
+    return true;
+}
+#endif
+
 template <Squirk Q>
 std::vector<std::pair<std::string, SQFUNCTION<Q>>> SQHook<Q>::CallTable = {
     {"util_load_script",                        SQCall_util_load_script},
@@ -1004,6 +1029,9 @@ SQInteger SQHook<Q>::HookNative(HSQUIRRELVM<Q> v)
         if (M2Config::bPatchesExternalHDFont && name && strcmp(name, "entryMGSFontData") == 0) {
             const auto version = SQSystemData<Q>::SettingETC::GetVersion();
             if (SQGlobals<Q>::GetTitle() != 99 || (version != "INTEGRAL" && version != "VR-DISK")) {
+#ifdef _WIN64
+                SetExternalFixedBankMapping(0, false);
+#endif
                 M2Config::bExternalHDFontUnavailable = false;
                 return func(v);
             }
@@ -1036,7 +1064,11 @@ SQInteger SQHook<Q>::HookNative(HSQUIRRELVM<Q> v)
                     if (SQBinary<Q>(SQHelper<Q>::GetObject(3, v).GetObject()).Size() != originalSize)
                         throw std::runtime_error("native Binary size disagrees with the verified layout");
                     font = it->second.ForType(type);
+                    if (!SetExternalFixedBankMapping(it->second.fixedBankBase, it->second.fixedBankCount != 0))
+                        throw std::runtime_error("unsupported native fixed-bank reader");
                 } catch (const std::exception &error) {
+                    font = nullptr;
+                    SetExternalFixedBankMapping(0, false);
                     spdlog::error("[SQ] External HD font: {}. Using guest font rendering.", error.what());
                 }
                 if (font) {

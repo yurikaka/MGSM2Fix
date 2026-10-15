@@ -36,6 +36,9 @@ private:
 struct ExternalHDFontSet {
     // Keep these buffers alive: native registration may retain their pointers.
     std::array<std::vector<std::uint8_t>, 3> files;
+    // Optional expanded resident bank, used by translations with >441 slots.
+    // Absent metadata preserves the retail EXE's original index table.
+    std::uint32_t fixedBankBase = 0, fixedBankCount = 0;
     static ExternalHDFontSet Load(const std::filesystem::path &directory, const std::string &version) {
         if (version != "INTEGRAL" && version != "VR-DISK")
             throw std::runtime_error("unsupported external font release");
@@ -62,6 +65,21 @@ struct ExternalHDFontSet {
             || result.files[2].size() / 36 >= 65535
             || result.files[1].size() != result.files[2].size() / 36 * 576)
             throw std::runtime_error("External HD font dimensions disagree");
+        std::ifstream mapping(fontDirectory / (prefix + "bank0.bin"), std::ios::binary | std::ios::ate);
+        if (mapping) {
+            if (mapping.tellg() != 8) throw std::runtime_error("invalid fixed-bank metadata");
+            mapping.seekg(0);
+            std::array<std::uint8_t, 8> raw{};
+            mapping.read(reinterpret_cast<char *>(raw.data()), raw.size());
+            auto le32 = [&](unsigned i) { return std::uint32_t(raw[i]) | (std::uint32_t(raw[i+1]) << 8)
+                | (std::uint32_t(raw[i+2]) << 16) | (std::uint32_t(raw[i+3]) << 24); };
+            result.fixedBankBase = le32(0);
+            result.fixedBankCount = le32(4);
+            const auto count = result.files[2].size()/36;
+            if (!result.fixedBankCount || result.fixedBankBase >= count
+                || result.fixedBankCount > count-result.fixedBankBase)
+                throw std::runtime_error("fixed-bank mapping exceeds native glyph table");
+        }
         return result;
     }
     const std::vector<std::uint8_t> *ForType(unsigned type) const {
