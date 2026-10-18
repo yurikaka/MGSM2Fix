@@ -10,6 +10,8 @@ bool DynamicCodeHooksReady = false;
 constexpr unsigned DynamicGuestGlyphs = 0x1f700000;
 using GuestRead8 = unsigned char (*)(M2_EmuR3000 *, unsigned);
 std::map<M2_EmuR3000 *, GuestRead8> DynamicGuestReaders;
+using GuestBusRead8 = unsigned char (*)(M2_EmuPSX *, unsigned);
+std::map<M2_EmuPSX *, GuestBusRead8> DynamicGuestBusReaders;
 
 unsigned __cdecl DecodeExternalDynamicCode(M2_EmuR3000 *cpu, unsigned code, unsigned address)
 {
@@ -38,9 +40,17 @@ const unsigned char * __cdecl ExternalDynamicGlyph(void *object, unsigned type, 
 unsigned char ReadExternalDynamicGlyph(M2_EmuR3000 *cpu, unsigned address)
 {
     const unsigned offset = address - DynamicGuestGlyphs;
-    if (DynamicCodeProfile && offset < DynamicCodeProfile->glyphs.size()*36)
-        return DynamicCodeProfile->glyphs[offset/36].low[offset%36];
+    unsigned char value = 0;
+    if (DynamicCodeProfile && DynamicCodeProfile->ReadLowGlyph(offset, value)) return value;
     return DynamicGuestReaders.at(cpu)(cpu, address);
+}
+
+unsigned char ReadExternalDynamicBusGlyph(M2_EmuPSX *machine, unsigned address)
+{
+    const unsigned offset = address - DynamicGuestGlyphs;
+    unsigned char value = 0;
+    if (DynamicCodeProfile && DynamicCodeProfile->ReadLowGlyph(offset, value)) return value;
+    return DynamicGuestBusReaders.at(machine)(machine, address);
 }
 
 void PrepareExternalDynamicGuestGlyph(M2_EmuR3000 *cpu, unsigned address)
@@ -51,6 +61,13 @@ void PrepareExternalDynamicGuestGlyph(M2_EmuR3000 *cpu, unsigned address)
     if (cpu->Read8 != ReadExternalDynamicGlyph) {
         DynamicGuestReaders[cpu] = cpu->Read8;
         cpu->Read8 = ReadExternalDynamicGlyph;
+    }
+    // Interpreted LB/LBU bypass cpu->Read8: after the fast RAM lookup they
+    // call cpu->Bus->Read8(cpu->Bus->Machine, physicalAddress).
+    auto *bus = cpu->Bus;
+    if (bus->Read8 != ReadExternalDynamicBusGlyph) {
+        DynamicGuestBusReaders[bus->Machine] = bus->Read8;
+        bus->Read8 = ReadExternalDynamicBusGlyph;
     }
     // Audited glyph JAL sites use s0 as code and store v0 at sp+16 in their
     // delay slots. The original PS1 rasterizer retains alignment and colour.

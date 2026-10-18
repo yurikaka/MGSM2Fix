@@ -51,6 +51,10 @@ int main() {
         for (unsigned y=0;y<48;++y) for (unsigned x=0;x<48;++x)
             assert(((p->glyphs[g].dot[y*12+x/4]>>(6-2*(x%4)))&3)==(x/4)%4);
     }
+    unsigned char byte=0;
+    assert(p->ReadLowGlyph(0,byte) && byte==0x1b);
+    assert(p->ReadLowGlyph(71,byte) && byte==0x1b);
+    assert(!p->ReadLowGlyph(72,byte) && !p->ReadLowGlyph(0xffffffffu,byte));
     assert(!p->GlyphData(0,0x9e00) && !p->GlyphData(1,0x9e02));
     // Different slot sizes, including a single glyph needing no writable tail.
     for (unsigned slot : {2u,14u,254u}) {

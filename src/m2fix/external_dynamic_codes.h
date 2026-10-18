@@ -45,6 +45,11 @@ struct ExternalDynamicCodeProfile {
         index = found->second;
         return true;
     }
+    bool ReadLowGlyph(unsigned offset, std::uint8_t &value) const {
+        if (offset >= glyphs.size()*36) return false;
+        value = glyphs[offset/36].low[offset%36];
+        return true;
+    }
     template<class Read, class Write>
     bool Expand(unsigned code, unsigned style, unsigned address, Read read, Write write, unsigned &first) const {
         const auto found = rules.find(code);

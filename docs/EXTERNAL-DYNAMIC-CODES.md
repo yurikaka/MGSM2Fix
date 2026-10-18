@@ -101,7 +101,10 @@ Custom banks require audited PS1 glyph-call addresses: Integral uses
 4659C/4679C; VR-DISK uses 46664/46864. These are physical RAM offsets of
 specific glyph JAL sites whose ABI uses s0 for the code and v0 for the bitmap
 pointer (the delay slot stores v0 at sp+16). The loader supplies a read-only
-virtual bitmap to the original PS1 rasterizer; colour, placement and advance
+virtual bitmap through both CPU and bus byte readers to the original PS1
+rasterizer. The retail LB/LBU interpreter calls the bus directly after its
+fast RAM lookup, bypassing the CPU byte reader; both paths must be intercepted.
+Colour, placement and advance
 remain its work. This field is not a general-purpose arbitrary hook address.
 Other releases require verifying equivalent call sites. The native decoder
 and font-reader hooks also require the supported x64 executable signatures.
