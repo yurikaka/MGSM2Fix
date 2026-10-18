@@ -108,6 +108,8 @@ void M2Config::Load()
     inipp::get_value(ini.sections["Patches"], "ChineseHDFontDirectory", sExternalHDFontDirectory);
     inipp::get_value(ini.sections["Patches"], "ExternalHDFont", bPatchesExternalHDFont);
     inipp::get_value(ini.sections["Patches"], "ExternalHDFontDirectory", sExternalHDFontDirectory);
+    inipp::get_value(ini.sections["Patches"], "ExternalDynamicCodeOverride", bExternalDynamicCodeOverride);
+    inipp::get_value(ini.sections["Patches"], "ExternalDynamicCodeOverridePath", sExternalDynamicCodeOverridePath);
     bExternalHDFontUnavailable = false;
     inipp::get_value(ini.sections["Patches"], "ExternalHDTextures", bExternalHDTextures);
     inipp::get_value(ini.sections["Patches"], "ExternalHDTextureManifest", sExternalHDTextureManifest);

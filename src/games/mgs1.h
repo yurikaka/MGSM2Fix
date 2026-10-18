@@ -43,6 +43,10 @@ public:
 
         Analog::LoadInstance();
 
+#ifdef _WIN64
+        InstallExternalDynamicCodes();
+#endif
+
         SQHook<Squirk::Standard>::SetReturnHook("set_playside_mgs", SQReturn_set_playside_mgs);
 
         if (M2Config::bPatchesRemoveUnderpants) {
@@ -247,6 +251,9 @@ public:
     static void AnalogLoop();
 
 private:
+#ifdef _WIN64
+    static void InstallExternalDynamicCodes();
+#endif
     // Resolved when the guest memory definition changes. Font rendering must
     // not call back into Squirrel for every glyph.
     std::vector<CompatibilityRule> MGS1_FontExclusions;

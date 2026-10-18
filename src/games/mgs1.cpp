@@ -1,6 +1,103 @@
 #include "mgs1.h"
 #include "psx.h"
 #include "sqhook.h"
+#include "external_dynamic_codes.h"
+
+#ifdef _WIN64
+namespace {
+const ExternalDynamicCodeProfile *DynamicCodeProfile = nullptr;
+bool DynamicCodeHooksReady = false;
+constexpr unsigned DynamicGuestGlyphs = 0x1f700000;
+using GuestRead8 = unsigned char (*)(M2_EmuR3000 *, unsigned);
+std::map<M2_EmuR3000 *, GuestRead8> DynamicGuestReaders;
+
+unsigned __cdecl DecodeExternalDynamicCode(M2_EmuR3000 *cpu, unsigned code, unsigned address)
+{
+    if (DynamicCodeProfile && DynamicCodeProfile->rules.count(code)) {
+        unsigned first = code;
+        if (DynamicCodeProfile->Expand(code, cpu->Read8(cpu, 0x200008), address,
+            [cpu](unsigned at) { return cpu->Read8(cpu, at); },
+            [cpu](unsigned at, unsigned char value) { cpu->Write8(cpu, at, value); }, first)) return first;
+        static std::set<unsigned> reported;
+        if (reported.insert(code).second)
+            spdlog::error("[MGS 1] Invalid external dynamic code 0x{:04x} style or expansion slot; check the manifest's slot_bytes and PPF padding. Leaving text untouched.", code);
+        return code;
+    }
+    return M2Hook::GetInstance().Invoke<unsigned>(DecodeExternalDynamicCode, cpu, code, address);
+}
+
+const unsigned char * __cdecl ExternalDynamicGlyph(void *object, unsigned type, unsigned code)
+{
+    if (DynamicCodeProfile) {
+        if (const auto *glyph = DynamicCodeProfile->GlyphData(type, code, *static_cast<unsigned char *>(object) != 0))
+            return glyph;
+    }
+    return M2Hook::GetInstance().Invoke<const unsigned char *>(ExternalDynamicGlyph, object, type, code);
+}
+
+unsigned char ReadExternalDynamicGlyph(M2_EmuR3000 *cpu, unsigned address)
+{
+    const unsigned offset = address - DynamicGuestGlyphs;
+    if (DynamicCodeProfile && offset < DynamicCodeProfile->glyphs.size()*36)
+        return DynamicCodeProfile->glyphs[offset/36].low[offset%36];
+    return DynamicGuestReaders.at(cpu)(cpu, address);
+}
+
+void PrepareExternalDynamicGuestGlyph(M2_EmuR3000 *cpu, unsigned address)
+{
+    if (!DynamicCodeProfile || !DynamicCodeProfile->guestFontCalls.count(address & 0x1fffff)) return;
+    unsigned index = 0;
+    if (!DynamicCodeProfile->LowGlyphIndex(cpu->Reg[16],index)) return;
+    if (cpu->Read8 != ReadExternalDynamicGlyph) {
+        DynamicGuestReaders[cpu] = cpu->Read8;
+        cpu->Read8 = ReadExternalDynamicGlyph;
+    }
+    // Audited glyph JAL sites use s0 as code and store v0 at sp+16 in their
+    // delay slots. The original PS1 rasterizer retains alignment and colour.
+    cpu->Reg[2] = DynamicGuestGlyphs + index*36;
+}
+
+void LoadExternalDynamicCodes()
+{
+    DynamicCodeProfile = nullptr;
+    if (!M2Config::bExternalDynamicCodeOverride || !DynamicCodeHooksReady) return;
+    try {
+        const auto path = M2Hook::GetInstance(".").ModuleLocation().parent_path()
+            / std::filesystem::u8path(M2Config::sExternalDynamicCodeOverridePath);
+        static std::map<std::filesystem::path, ExternalDynamicCodes> cache;
+        auto it = cache.find(path);
+        if (it == cache.end()) it = cache.emplace(path, ExternalDynamicCodes::Load(path)).first;
+        const auto version = SQSystemData<Squirk::Standard>::SettingETC::GetVersion();
+        DynamicCodeProfile = it->second.Find(SQGlobals<Squirk::Standard>::GetTitle(), version);
+        if (DynamicCodeProfile)
+            spdlog::info("[MGS 1] External dynamic code overrides enabled for {}: {} codes, {} glyphs.", version, DynamicCodeProfile->rules.size(), DynamicCodeProfile->glyphs.size());
+    } catch (const std::exception &error) {
+        spdlog::error("[MGS 1] External dynamic code overrides disabled: {}.", error.what());
+    }
+}
+} // namespace
+
+void MGS1::InstallExternalDynamicCodes()
+{
+    if (!M2Config::bExternalDynamicCodeOverride) return;
+    auto *base = reinterpret_cast<unsigned char *>(GetModuleHandle(nullptr));
+    const auto *dos = reinterpret_cast<const IMAGE_DOS_HEADER *>(base);
+    const auto *nt = reinterpret_cast<const IMAGE_NT_HEADERS64 *>(base + dos->e_lfanew);
+    const unsigned char decoder[] = {0x48,0x89,0x5c,0x24,0x08,0x48,0x89,0x6c,0x24,0x18,
+        0x48,0x89,0x74,0x24,0x20,0x57,0x41,0x56,0x41,0x57,0x48,0x83,0xec,0x20};
+    const unsigned char reader[] = {0x48,0x89,0x5c,0x24,0x08,0x48,0x63,0xc2,0x48,0x8b,0xd9,
+        0x45,0x0f,0xb7,0xd8,0x48,0x83,0x7c,0xc1,0x08,0x00};
+    if (nt->OptionalHeader.SizeOfImage <= 0x26db50) return;
+    if (std::memcmp(base + 0x26d5f0, decoder, sizeof(decoder)) != 0
+        || std::memcmp(base + 0x107d60, reader, sizeof(reader)) != 0) {
+        spdlog::error("[MGS 1] External dynamic codes: unsupported native decoder/font reader.");
+        return;
+    }
+    auto &hook = M2Hook::GetInstance();
+    if (!hook.Hook(base + 0x107d60, ExternalDynamicGlyph, "External dynamic glyphs")) return;
+    DynamicCodeHooksReady = hook.Hook(base + 0x26d5f0, DecodeExternalDynamicCode, "External dynamic code overrides");
+}
+#endif
 
 int MGS1::MGS1_main(M2_EmuR3000 *cpu, int cycle, unsigned int address)
 {
@@ -58,6 +155,9 @@ int MGS1::MGS1_font(M2_EmuR3000 *cpu, int cycle, unsigned int address)
             }
         }
     }
+#ifdef _WIN64
+    PrepareExternalDynamicGuestGlyph(cpu, address);
+#endif
     if (!M2Config::bPatchesDisableFont && !partialBlock && !M2Config::bExternalHDFontUnavailable) {
         PSXFUNCTION font = PSX::UserHandler(cpu, address);
         return font(cpu, cycle, address);
@@ -74,6 +174,9 @@ SQInteger MGS1::SQReturn_set_playside_mgs(HSQUIRRELVM<Squirk::Standard> v)
 
 void MGS1::SQOnMemoryDefine()
 {
+#ifdef _WIN64
+    LoadExternalDynamicCodes();
+#endif
     MGS1_FontExclusions.clear();
     if (M2Config::bPatchesPartialDisableFont) {
         auto title = SQGlobals<Squirk::Standard>::GetTitle();

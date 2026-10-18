@@ -87,6 +87,8 @@ public:
     static inline bool bPatchesPartialDisableCDROM = false;
     static inline bool bPatchesPartialDisableFont = false;
     static inline bool bPatchesExternalHDFont = false;
+    static inline bool bExternalDynamicCodeOverride = false;
+    static inline std::string sExternalDynamicCodeOverridePath = "mods/dynamic-codes/manifest.json";
     static inline std::string sExternalHDFontDirectory = "mods/hd-fonts";
     static inline bool bExternalHDFontUnavailable = false;
     static inline bool bExternalHDTextures = false;

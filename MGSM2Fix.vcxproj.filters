@@ -395,6 +395,9 @@
     <ClInclude Include="src\m2fix\external_hd_font.h">
       <Filter>M2Fix</Filter>
     </ClInclude>
+    <ClInclude Include="src\m2fix\external_dynamic_codes.h">
+      <Filter>M2Fix</Filter>
+    </ClInclude>
     <ClInclude Include="src\bindings\sqbinary.h">
       <Filter>Bindings</Filter>
     </ClInclude>
