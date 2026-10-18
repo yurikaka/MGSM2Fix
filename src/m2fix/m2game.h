@@ -41,6 +41,8 @@ public:
 	virtual bool SQOnRamRead(unsigned width, unsigned offset) { return false; }
 
 	virtual std::any EPIModuleHook() { return {}; }
+	// Extra callbacks must be added before native module registration.
+	virtual std::any EPIAdditionalModuleHook() { return {}; }
 
 	virtual void EPIOnLoadImage(void *image, unsigned int size) {}
 	virtual bool EPIOnMachineCommand(std::any machine, int cmd, unsigned int **args) { return true; }

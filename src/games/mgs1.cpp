@@ -2,6 +2,7 @@
 #include "psx.h"
 #include "sqhook.h"
 #include "external_dynamic_codes.h"
+#include "external_hd_font.h"
 
 #ifdef _WIN64
 namespace {
@@ -153,6 +154,42 @@ int MGS1::MGS1_s03d_disable_mosaic(M2_EmuR3000 *cpu, int cycle, unsigned int add
         return s03d_disable_mosaic(cpu, cycle, address);
     }
 
+    return cpu->Execute(cpu, cycle, address);
+}
+
+int MGS1::MGS1_HDAdvance(M2_EmuR3000 *cpu, int cycle, unsigned int address)
+{
+#ifdef _WIN64
+    const unsigned pc = address & 0x1fffff;
+    const bool vr = pc == 0x457c0 || pc == 0x45830;
+    const bool draw = pc == (vr ? 0x457c0 : 0x456f8);
+    const unsigned drawEntry = vr ? 0x45514 : 0x4544c;
+    bool enabled = M2Config::bPatchesExternalHDFont && !M2Config::bExternalHDFontUnavailable
+        && !M2Config::bPatchesDisableFont && ExternalHDAdvance::release == (vr ? 2u : 1u)
+        && cpu->Bus->Machine->DipSwitch.HighP != 0;
+    if (enabled && M2Config::bPatchesPartialDisableFont) {
+        for (const auto &rule : GetInstance().MGS1_FontExclusions)
+            if (rule.overlaps(drawEntry, 1)) enabled = false;
+    }
+    // Fail closed if a different guest executable occupies this address.
+    const bool verified = draw
+        ? cpu->Read32(cpu, address) == 0x8fbf0024 && cpu->Read32(cpu, address + 4) == 0x8fb40020
+        : cpu->Read32(cpu, address) == 0x00021602 && cpu->Read32(cpu, address + 8) == 0x3042000f;
+    if (enabled && verified) {
+        if (draw) {
+            // Rasterization has finished using the untouched 8-wide source.
+            // The fifth argument still lives at the original sp+16 (=sp+56).
+            const unsigned code = cpu->Read32(cpu, cpu->Reg[29] + 0x38) & 0xff;
+            cpu->Reg[2] = ExternalHDAdvance::rules.AdjustCode(code, cpu->Reg[2], true);
+        } else {
+            // get_hantable normalized a0 to code-32. This caller only measures
+            // width; keep the rasterizer's separate get_hantable call intact.
+            const unsigned packed = cpu->Reg[2];
+            const unsigned width = ExternalHDAdvance::rules.AdjustIndex(cpu->Reg[4], (packed >> 24) & 15, true);
+            cpu->Reg[2] = (packed & ~0x0f000000u) | (width << 24);
+        }
+    }
+#endif
     return cpu->Execute(cpu, cycle, address);
 }
 

@@ -1029,6 +1029,7 @@ SQInteger SQHook<Q>::HookNative(HSQUIRRELVM<Q> v)
         if (M2Config::bPatchesExternalHDFont && name && strcmp(name, "entryMGSFontData") == 0) {
             const auto version = SQSystemData<Q>::SettingETC::GetVersion();
             if (SQGlobals<Q>::GetTitle() != 99 || (version != "INTEGRAL" && version != "VR-DISK")) {
+                ExternalHDAdvance::Reset();
 #ifdef _WIN64
                 SetExternalFixedBankMapping(0, false);
 #endif
@@ -1050,6 +1051,7 @@ SQInteger SQHook<Q>::HookNative(HSQUIRRELVM<Q> v)
                 && std::memcmp(base + 0x2b077, reader, sizeof(reader)) == 0) {
                 SQUserPointer binary = nullptr;
                 const std::vector<std::uint8_t> *font = nullptr;
+                const ExternalHDFontSet *fontSet = nullptr;
                 try {
                     const auto directory = M2Hook::GetInstance(".").ModuleLocation().parent_path()
                         / std::filesystem::u8path(M2Config::sExternalHDFontDirectory);
@@ -1063,11 +1065,13 @@ SQInteger SQHook<Q>::HookNative(HSQUIRRELVM<Q> v)
                     std::memcpy(&originalSize, static_cast<unsigned char *>(binary) + 0x58, sizeof(originalSize));
                     if (SQBinary<Q>(SQHelper<Q>::GetObject(3, v).GetObject()).Size() != originalSize)
                         throw std::runtime_error("native Binary size disagrees with the verified layout");
-                    font = it->second.ForType(type);
+                    fontSet = &it->second;
+                    font = fontSet->ForType(type);
                     if (!SetExternalFixedBankMapping(it->second.fixedBankBase, it->second.fixedBankCount != 0))
                         throw std::runtime_error("unsupported native fixed-bank reader");
                 } catch (const std::exception &error) {
                     font = nullptr;
+                    ExternalHDAdvance::Reset();
                     SetExternalFixedBankMapping(0, false);
                     spdlog::error("[SQ] External HD font: {}. Using guest font rendering.", error.what());
                 }
@@ -1075,13 +1079,17 @@ SQInteger SQHook<Q>::HookNative(HSQUIRRELVM<Q> v)
                     M2Config::bExternalHDFontUnavailable = false;
                     ScopedExternalFontBuffer replacement(binary, *font);
                     spdlog::info("[SQ] External HD font registration: {}, type {} (runtime only).", version, type);
-                    return func(v);
+                    const auto result = func(v);
+                    if (type == 0 && result >= 0) ExternalHDAdvance::Register(version, fontSet->advances);
+                    else if (result < 0) ExternalHDAdvance::Reset();
+                    return result;
                 }
             } else spdlog::error("[SQ] Unsupported native font Binary reader; using guest font rendering.");
 #else
             spdlog::error("[SQ] External HD runtime font registration requires the audited x64 game.");
 #endif
             M2Config::bExternalHDFontUnavailable = true;
+            ExternalHDAdvance::Reset();
         }
         return func(v);
     }

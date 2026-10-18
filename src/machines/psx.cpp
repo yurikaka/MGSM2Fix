@@ -95,12 +95,33 @@ M2_EmuPSX_Module *PSX::LoadUserModule(M2_EmuPSX_Module *mod)
         return _mod;
     }
 
-    M2_EmuPSX_TableEntry *_table = new M2_EmuPSX_TableEntry[user->count];
-    memcpy(_table, user->table, sizeof(M2_EmuPSX_TableEntry) * user->count);
+    std::vector<M2_EmuPSX_TableEntry> entries(user->table, user->table + user->count);
+    const auto extra = M2Fix::GameInstance().EPIAdditionalModuleHook();
+    if (extra.has_value()) {
+        const auto tables = std::any_cast<PSX_ModuleTables>(extra);
+        const auto found = tables.find(mod->name);
+        if (found != tables.end()) {
+            for (const auto &callback : *found->second) {
+                const auto duplicate = std::find_if(entries.begin(), entries.end(), [&](const auto &row) {
+                    return row.address == callback.first;
+                });
+                if (duplicate != entries.end()) {
+                    spdlog::error("[PSX] Additional callback 0x{:x} conflicts with {}. Keeping original.", callback.first, mod->name);
+                    continue;
+                }
+                entries.push_back({callback.first, callback.second});
+            }
+        }
+    }
+    // Extend our copy before passing it to native module registration. The
+    // original table and any pointers retained by the emulator remain intact.
+    M2_EmuPSX_TableEntry *_table = new M2_EmuPSX_TableEntry[entries.size()];
+    std::copy(entries.begin(), entries.end(), _table);
 
     M2_EmuPSX_UserModule *_user = new M2_EmuPSX_UserModule;
     memcpy(_user, user, sizeof(M2_EmuPSX_UserModule));
     _user->table = _table;
+    _user->count = static_cast<int>(entries.size());
 
     M2_EmuPSX_Module *_mod = new M2_EmuPSX_Module;
     memcpy(_mod, mod, sizeof(M2_EmuPSX_Module));

@@ -180,6 +180,23 @@ public:
         return MGS1_ModuleTables;
     }
 
+    virtual std::any EPIAdditionalModuleHook() override
+    {
+#ifdef _WIN64
+        if (M2Config::bPatchesExternalHDFont) {
+            static const std::vector<std::pair<unsigned, PSXFUNCTION>> integral = {
+                {0x800456f8, MGS1_HDAdvance}, {0x80045768, MGS1_HDAdvance}};
+            static const std::vector<std::pair<unsigned, PSXFUNCTION>> vr = {
+                {0x800457c0, MGS1_HDAdvance}, {0x80045830, MGS1_HDAdvance}};
+            static const PSX_ModuleTables tables{{
+                {"mgs_r3000_int", &integral}, {"mgs_r3000_vr_jp", &vr}},
+                [](const char *a, const char *b) { return strcmp(a, b) < 0; }};
+            return tables;
+        }
+#endif
+        return {};
+    }
+
 
     virtual std::vector<Ketchup_TitleInfo> *SQKetchupHook() override
     {
@@ -244,6 +261,7 @@ public:
     static int MGS1_main(M2_EmuR3000 *cpu, int cycle, unsigned int address);
     static int MGS1_s03a_disable_mosaic(M2_EmuR3000 *cpu, int cycle, unsigned int address);
     static int MGS1_s03d_disable_mosaic(M2_EmuR3000 *cpu, int cycle, unsigned int address);
+    static int MGS1_HDAdvance(M2_EmuR3000 *cpu, int cycle, unsigned int address);
     static int MGS1_font(M2_EmuR3000 *cpu, int cycle, unsigned int address);
 
     static SQInteger SQReturn_set_playside_mgs(HSQUIRRELVM<Squirk::Standard> v);

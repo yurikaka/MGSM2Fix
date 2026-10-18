@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <nlohmann/json.hpp>
 
 // Audited x64 Binary layout. Borrow replacement data during registration;
 // preserve the original allocation and restore both fields on scope exit.
@@ -33,12 +34,71 @@ private:
     std::uint32_t originalSize;
 };
 
+// Optional layout metadata; never changes the bitmap or font.res raster stride.
+struct ExternalHDAdvanceRules {
+    std::array<std::array<std::uint8_t, 16>, 112> overrides{};
+    static ExternalHDAdvanceRules Load(const std::filesystem::path &path) {
+        ExternalHDAdvanceRules result;
+        if (!std::filesystem::exists(path)) return result;
+        std::ifstream input(path, std::ios::binary | std::ios::ate);
+        if (!input || input.tellg() <= 0 || input.tellg() > 65536)
+            throw std::runtime_error("invalid external HD advances file");
+        input.seekg(0);
+        const auto doc = nlohmann::json::parse(input);
+        if (!doc.is_object() || !doc.contains("schema") || !doc["schema"].is_number_integer() || doc["schema"] != 1
+            || !doc.contains("overrides") || !doc["overrides"].is_array()
+            || doc["overrides"].size() > 112 * 15)
+            throw std::runtime_error("invalid external HD advances schema");
+        for (const auto &rule : doc["overrides"]) {
+            auto number = [&](const char *key, int lo, int hi) {
+                if (!rule.is_object() || !rule.contains(key) || !rule[key].is_number_integer()
+                    || rule[key] < lo || rule[key] > hi)
+                    throw std::runtime_error("invalid external HD advance rule");
+                return rule[key].get<unsigned>();
+            };
+            const unsigned index = number("glyph_index", 0, 111);
+            const unsigned from = number("from", 1, 15);
+            const unsigned to = number("to", 1, 15);
+            if (result.overrides[index][from])
+                throw std::runtime_error("duplicate external HD advance rule");
+            result.overrides[index][from] = static_cast<std::uint8_t>(to);
+        }
+        return result;
+    }
+    unsigned AdjustIndex(unsigned index, unsigned original, bool hd) const {
+        if (!hd || index >= overrides.size() || original >= 16) return original;
+        const auto width = overrides[index][original];
+        return width ? width : original;
+    }
+    unsigned AdjustCode(unsigned code, unsigned original, bool hd) const {
+        // Same normalization as the guest's get_hantable; no language-specific
+        // character or desired width is hard-coded in the runtime.
+        if (code > 128) code -= 34;
+        if (code > 0) code -= 32;
+        return AdjustIndex(code, original, hd);
+    }
+};
+
+struct ExternalHDAdvance {
+    static inline unsigned release = 0; // 1: Integral, 2: Japanese VR
+    static inline ExternalHDAdvanceRules rules{};
+    static void Reset() { release = 0; rules = {}; }
+    static void Register(const std::string &version, const ExternalHDAdvanceRules &loaded) {
+        Reset();
+        if (version == "INTEGRAL") release = 1;
+        else if (version == "VR-DISK") release = 2;
+        else return;
+        rules = loaded;
+    }
+};
+
 struct ExternalHDFontSet {
     // Keep these buffers alive: native registration may retain their pointers.
     std::array<std::vector<std::uint8_t>, 3> files;
     // Optional expanded resident bank, used by translations with >441 slots.
     // Absent metadata preserves the retail EXE's original index table.
     std::uint32_t fixedBankBase = 0, fixedBankCount = 0;
+    ExternalHDAdvanceRules advances;
     static ExternalHDFontSet Load(const std::filesystem::path &directory, const std::string &version) {
         if (version != "INTEGRAL" && version != "VR-DISK")
             throw std::runtime_error("unsupported external font release");
@@ -49,6 +109,7 @@ struct ExternalHDFontSet {
         const std::string prefix = releaseDirectory ? "" : (version == "VR-DISK" ? "cn_vr_" : "cn_");
         const char *names[] = {"hankaku_4x.bin", "kanji_4x.bin", "fontall.bin"};
         ExternalHDFontSet result;
+        result.advances = ExternalHDAdvanceRules::Load(fontDirectory / (prefix + "advances.json"));
         for (unsigned i = 0; i < 3; ++i) {
             std::ifstream input(fontDirectory / (prefix + names[i]), std::ios::binary | std::ios::ate);
             if (!input) throw std::runtime_error("missing External HD font: " + prefix + names[i]);
