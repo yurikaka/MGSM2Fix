@@ -18,6 +18,7 @@
 struct ExternalDynamicCodeProfile {
     struct Rule {
         unsigned code = 0, slotBytes = 0;
+        bool acceptNativeNineByteSlot = false;
         std::array<std::vector<std::uint8_t>, 6> labels;
     };
     struct Glyph {
@@ -29,10 +30,33 @@ struct ExternalDynamicCodeProfile {
     std::string version;
     std::set<unsigned> guestFontCalls;
     std::map<unsigned, Rule> rules;
+    // Optional post-processing of the native decoder's first glyph. The
+    // native decoder still owns its variable-length tail and control bytes.
+    std::map<std::pair<unsigned, unsigned>, unsigned> nativeFirstRemaps;
+    std::map<std::pair<unsigned, unsigned>, unsigned> nativeTailRemaps;
     std::vector<Glyph> glyphs;
     std::map<unsigned, unsigned> glyphIndices;
 
     static bool IsDynamic(unsigned code) { return code >= 0x8180 && code <= 0x8192; }
+    unsigned RemapNativeFirst(unsigned code, unsigned first) const {
+        const auto found = nativeFirstRemaps.find({code, first});
+        return found == nativeFirstRemaps.end() ? first : found->second;
+    }
+    template<class Read, class Write>
+    void RemapNativeTail(unsigned code, unsigned address, Read read, Write write) const {
+        // These official codes have fixed two-byte glyph tails. Preserve the
+        // half/full-width flag bits and touch only a configured glyph token.
+        if (nativeTailRemaps.empty() || address > std::numeric_limits<unsigned>::max()-13) return;
+        const unsigned tailBytes=code==0x8188 ? 12 : (code==0x8184 || code==0x8185 || code==0x8187) ? 8 : 0;
+        for (unsigned i=2;i<2+tailBytes;i+=2) {
+            const unsigned original=(unsigned(read(address+i))<<8)|read(address+i+1);
+            const auto found=nativeTailRemaps.find({code,original&0x9fff});
+            if (found==nativeTailRemaps.end()) continue;
+            const unsigned replacement=(original&0x6000)|found->second;
+            write(address+i,static_cast<unsigned char>(replacement>>8));
+            write(address+i+1,static_cast<unsigned char>(replacement));
+        }
+    }
     const std::uint8_t *GlyphData(unsigned type, unsigned code, bool high = true) const {
         const auto found = glyphIndices.find(code & 0x9fff);
         if (type != 1 || found == glyphIndices.end()) return nullptr;
@@ -64,9 +88,22 @@ struct ExternalDynamicCodeProfile {
         }
         if (!safe) for (const auto &label : rule.labels)
             if (std::equal(tail.begin(), tail.end(), label.begin()+2)) { safe = true; break; }
+        bool nativeInitial = false;
+        if (!safe && rule.acceptNativeNineByteSlot && rule.slotBytes == 8
+            && address <= std::numeric_limits<unsigned>::max() - 8) {
+            // Retail 818D/E use a nine-byte slot with a leading one-byte
+            // space. Normalize that complete, exactly matched placeholder
+            // to the eight-byte override slot followed by one space.
+            static constexpr std::array<std::uint8_t, 7> nativeTail{{0x20,0x80,0x00,0x80,0x00,0x80,0x00}};
+            nativeInitial = true;
+            for (unsigned i = 0; i < nativeTail.size(); ++i)
+                nativeInitial = nativeInitial && read(address+2+i) == nativeTail[i];
+            safe = nativeInitial;
+        }
         if (!safe) return false;
         const auto &label = rule.labels[style];
         for (unsigned i = 0; i < tail.size(); ++i) write(address+2+i, label[i+2]);
+        if (nativeInitial) write(address+8, 0x20);
         first = (unsigned(label[0]) << 8) | label[1];
         return true;
     }
@@ -157,6 +194,36 @@ struct ExternalDynamicCodes {
                 if (!profile.glyphs.empty() && profile.guestFontCalls.empty())
                     throw std::runtime_error("custom glyph banks require audited guest_font_calls for low-resolution rendering");
             }
+            if (item.contains("native_first_remaps")) {
+                const auto &remaps = item.at("native_first_remaps");
+                if (!remaps.is_array() || remaps.size() > 256)
+                    throw std::runtime_error("invalid native first-glyph remaps");
+                for (const auto &entry : remaps) {
+                    const auto code = Number(entry.at("code"));
+                    const auto from = Number(entry.at("from"));
+                    const auto to = Number(entry.at("to"));
+                    if (!ExternalDynamicCodeProfile::IsDynamic(code)
+                        || from < 0x8100 || from > 0x9fff || ExternalDynamicCodeProfile::IsDynamic(from)
+                        || to < 0x8100 || to > 0x9fff || ExternalDynamicCodeProfile::IsDynamic(to)
+                        || !profile.nativeFirstRemaps.emplace(std::make_pair(code, from), to).second)
+                        throw std::runtime_error("invalid or duplicate native first-glyph remap");
+                }
+            }
+            if (item.contains("native_tail_remaps")) {
+                const auto &remaps = item.at("native_tail_remaps");
+                if (!remaps.is_array() || remaps.size() > 256)
+                    throw std::runtime_error("invalid native tail-glyph remaps");
+                for (const auto &entry : remaps) {
+                    const auto code = Number(entry.at("code"));
+                    const auto from = Number(entry.at("from"));
+                    const auto to = Number(entry.at("to"));
+                    if ((code!=0x8184 && code!=0x8185 && code!=0x8187 && code!=0x8188)
+                        || from < 0x8100 || from > 0x9fff || ExternalDynamicCodeProfile::IsDynamic(from)
+                        || to < 0x8100 || to > 0x9fff || ExternalDynamicCodeProfile::IsDynamic(to)
+                        || !profile.nativeTailRemaps.emplace(std::make_pair(code, from), to).second)
+                        throw std::runtime_error("invalid or duplicate native tail-glyph remap");
+                }
+            }
             if (!item.at("codes").is_array() || item.at("codes").empty() || item.at("codes").size() > 19)
                 throw std::runtime_error("invalid dynamic code rule list");
             static const char *styles[] = {"PS","PS_SWAP","NX","XBOX","STEAM","PS5"};
@@ -165,6 +232,11 @@ struct ExternalDynamicCodes {
                 rule.code = Number(entry.at("code")); rule.slotBytes = Number(entry.at("slot_bytes"));
                 if (!ExternalDynamicCodeProfile::IsDynamic(rule.code) || rule.slotBytes < 2 || rule.slotBytes > 254 || rule.slotBytes%2)
                     throw std::runtime_error("unsupported dynamic code or invalid slot_bytes");
+                if (entry.contains("accept_native_nine_byte_slot")) {
+                    if (!entry.at("accept_native_nine_byte_slot").is_boolean() || rule.slotBytes != 8)
+                        throw std::runtime_error("invalid native nine-byte slot option");
+                    rule.acceptNativeNineByteSlot = entry.at("accept_native_nine_byte_slot").get<bool>();
+                }
                 const auto &labels = entry.at("labels");
                 if (!labels.is_object() || labels.size() != 6) throw std::runtime_error("exactly six platform labels are required");
                 for (unsigned s = 0; s < 6; ++s) {

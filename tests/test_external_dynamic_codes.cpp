@@ -23,6 +23,24 @@ int main() {
     const auto config = load(valid);
     const auto *p = config.Find(99,"TEST");
     assert(p && !config.Find(100,"TEST") && !config.Find(99,"OTHER"));
+    // Absent remapping is a strict no-op; configured remaps affect only the
+    // exact native decoder code/result pair and never alter the native tail.
+    assert(p->RemapNativeFirst(0x8190,0x8151)==0x8151);
+    auto withRemaps=valid;
+    withRemaps["profiles"][0]["native_first_remaps"]={{{"code","0x8190"},{"from","0x8151"},{"to","0x9e00"}}};
+    const auto remapped=load(withRemaps);const auto &rp=remapped.profiles[0];
+    assert(rp.RemapNativeFirst(0x8190,0x8151)==0x9e00);
+    assert(rp.RemapNativeFirst(0x8191,0x8151)==0x8151);
+    assert(rp.RemapNativeFirst(0x8190,0x8150)==0x8150);
+    auto withTail=valid;
+    withTail["profiles"][0]["native_tail_remaps"]={{{"code","0x8185"},{"from","0x823c"},{"to","0x9e00"}}};
+    const auto tailConfig=load(withTail);const auto &tp=tailConfig.profiles[0];
+    std::array<unsigned char,16> t{{0x81,0x85,0x82,0x3c,0x82,0x1f,0x82,0x53,0x80,0,0x80,0,0x80,0,0x91,0x2a}};
+    unsigned tailWrites=0;
+    tp.RemapNativeTail(0x8185,0,[&](unsigned i){return t.at(i);},[&](unsigned i,unsigned char v){assert(i==2||i==3);t.at(i)=v;++tailWrites;});
+    assert(tailWrites==2 && t[2]==0x9e && t[3]==0 && t[4]==0x82 && t[5]==0x1f && t[14]==0x91 && t[15]==0x2a);
+    tp.RemapNativeTail(0x8185,0,[&](unsigned i){return t.at(i);},[&](unsigned,unsigned char){assert(false);});
+    tp.RemapNativeTail(0x8184,0,[&](unsigned i){return t.at(i);},[&](unsigned,unsigned char){assert(false);});
     std::array<unsigned char,10> memory{{0x81,0x82,0x80,0,0x80,0,0x91,0x2a,0,0xff}};
     const auto suffix = memory;
     unsigned first = 0, writes = 0;
@@ -39,6 +57,28 @@ int main() {
     assert(!p->Expand(0x8182,6,0,read,put,first));
     assert(!p->Expand(0x8182,0,0xfffffffbu,read,put,first));
     assert(memory==saved);
+    // An explicitly opted-in retail nine-byte placeholder is normalized
+    // without overwriting the following text; later expansions use the usual
+    // eight-byte layout and preserve the separator.
+    {
+        auto j=valid; auto &rule=j["profiles"][0]["codes"][0];
+        rule["slot_bytes"]=8; rule["accept_native_nine_byte_slot"]=true;
+        auto c=load(j);auto &r=c.profiles[0];
+        std::array<unsigned char,12> native{{0x81,0x82,0x20,0x80,0,0x80,0,0x80,0,0x91,0x2a,0xff}};
+        const auto original=native;
+        for (unsigned repeat=0;repeat<3;++repeat) for (unsigned style=0;style<6;++style) {
+            unsigned n=0;
+            assert(r.Expand(0x8182,style,0,[&](unsigned at){return native.at(at);},
+                [&](unsigned at,unsigned char x){assert(at>=2&&at<=8);native.at(at)=x;++n;},first));
+            assert(n==(repeat==0&&style==0?7u:6u));
+            assert(native[8]==0x20 && native[9]==original[9] && native[10]==original[10] && native[11]==original[11]);
+        }
+        for (unsigned at=2;at<=8;++at) {
+            auto bad=original;bad[at]^=0x40;const auto before=bad;unsigned n=0;
+            assert(!r.Expand(0x8182,0,0,[&](unsigned i){return bad.at(i);},[&](unsigned,unsigned char){++n;},first));
+            assert(!n && bad==before);
+        }
+    }
     for (unsigned i=2;i<6;++i) {
         memory=saved; memory[i]=0x7f; const auto before=memory; writes=0;
         assert(!p->Expand(0x8182,0,0,read,put,first) && writes==0 && memory==before);
@@ -68,6 +108,13 @@ int main() {
         assert(first==0x8041 && b[slot]==0x92);
     }
     auto j=valid; j["profiles"].push_back(profile); reject(j);
+    j=withRemaps; j["profiles"][0]["native_first_remaps"].push_back(j["profiles"][0]["native_first_remaps"][0]); reject(j);
+    j=withRemaps; j["profiles"][0]["native_first_remaps"][0]["code"]="0x8193"; reject(j);
+    j=withRemaps; j["profiles"][0]["native_first_remaps"][0]["to"]="0x8186"; reject(j);
+    j=withTail; j["profiles"][0]["native_tail_remaps"].push_back(j["profiles"][0]["native_tail_remaps"][0]); reject(j);
+    j=withTail; j["profiles"][0]["native_tail_remaps"][0]["from"]="0x8186"; reject(j);
+    j=valid; j["profiles"][0]["codes"][0]["accept_native_nine_byte_slot"]=true; reject(j);
+    j=valid; j["profiles"][0]["codes"][0]["slot_bytes"]=8; j["profiles"][0]["codes"][0]["accept_native_nine_byte_slot"]="true"; reject(j);
     j=valid; j["profiles"][0]["codes"].push_back(profile["codes"][0]); reject(j);
     j=valid; j["profiles"][0]["glyph_banks"].push_back(profile["glyph_banks"][0]); reject(j);
     j=valid; j["profiles"][0]["guest_font_calls"]=Json::array(); reject(j);

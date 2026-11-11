@@ -26,7 +26,11 @@ unsigned __cdecl DecodeExternalDynamicCode(M2_EmuR3000 *cpu, unsigned code, unsi
             spdlog::error("[MGS 1] Invalid external dynamic code 0x{:04x} style or expansion slot; check the manifest's slot_bytes and PPF padding. Leaving text untouched.", code);
         return code;
     }
-    return M2Hook::GetInstance().Invoke<unsigned>(DecodeExternalDynamicCode, cpu, code, address);
+    const auto native = M2Hook::GetInstance().Invoke<unsigned>(DecodeExternalDynamicCode, cpu, code, address);
+    if (DynamicCodeProfile) DynamicCodeProfile->RemapNativeTail(code, address,
+        [cpu](unsigned at) { return cpu->Read8(cpu, at); },
+        [cpu](unsigned at, unsigned char value) { cpu->Write8(cpu, at, value); });
+    return DynamicCodeProfile ? DynamicCodeProfile->RemapNativeFirst(code, native) : native;
 }
 
 const unsigned char * __cdecl ExternalDynamicGlyph(void *object, unsigned type, unsigned code)

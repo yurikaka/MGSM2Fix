@@ -49,6 +49,27 @@ accept decimal JSON integers or hexadecimal strings. Profiles match both title
 and version exactly (Integral uses title 99; its releases are INTEGRAL and
 VR-DISK). One manifest may contain multiple profiles.
 
+A profile may also specify `native_first_remaps`, for example:
+
+```json
+"native_first_remaps": [
+  {"code": "0x8190", "from": "0x8151", "to": "0x9ff4"}
+]
+```
+
+This runs the official decoder first and remaps its returned glyph only when
+both the dynamic code and returned glyph match. The native decoder's remaining
+text, control bytes, and writable-slot requirements are unchanged. The target
+may refer to a glyph in the profile's external banks. An absent list leaves
+native results untouched. Codes with a full `codes` override use that override
+instead; native remaps apply only when the official decoder runs.
+
+`native_tail_remaps` has the same fields and remaps configured two-byte
+glyphs in the official decoder's native tail, preserving glyph flag bits.
+It accepts only the audited 8184, 8185, 8187 and 8188 codes; their native
+tails are respectively 8, 8, 8 and 12 bytes. It does not alter following
+text. This is useful when a translation reuses Japanese button glyph slots.
+
 The native decoder accepts dynamic codes **8180–8192**. Any of these, including
 an official code already in use, may be overridden. Codes absent from the
 active profile retain the official decoder. This does not add arbitrary
@@ -67,6 +88,12 @@ slot contents, not allocation metadata: the translation author must allocate
 space and rebuild text/dialogue structures correctly in the PPF. Existing
 official text may use a different slot length; matching its code alone is not
 sufficient. All uses of a code within a profile need the same slot size.
+
+For an eight-byte override, `"accept_native_nine_byte_slot": true` may be
+set on the rule to also accept the exact retail placeholder `20 80 00 80 00
+80 00` after its marker. The first expansion rewrites that full placeholder
+as the configured six-byte tail followed by a space, preserving the following
+text. Other layouts are still rejected. This option is off by default.
 
 ## Multiple optional glyph banks
 
