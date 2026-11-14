@@ -182,6 +182,7 @@ void M2Config::Load()
         }
     }
     inipp::get_value(ini.sections["Patches"], "PreserveConfiguration", bPatchesPreserveConfiguration);
+    inipp::get_value(ini.sections["Patches"], "RefreshControllerRAM", bPatchesRefreshControllerRAM);
     inipp::get_value(ini.sections["Patches"], "IntegralEnglishPatch", bPatchesIntegralEnglish);
     inipp::get_value(ini.sections["Patches"], "IntegralVREnglishPatch", bPatchesIntegralVREnglish);
     inipp::get_value(ini.sections["Patches"], "GrenadeDelayFix", bPatchesGrenadeDelay);
@@ -305,6 +306,7 @@ void M2Config::Load()
         eBrightnessText == M2BrightnessText::Fixed    ? "fixed"    :
         eBrightnessText == M2BrightnessText::Original ? "original" : "collection");
     spdlog::info("[Config] bPatchesPreserveConfiguration: {}", bPatchesPreserveConfiguration);
+    spdlog::info("[Config] bPatchesRefreshControllerRAM: {}", bPatchesRefreshControllerRAM);
     spdlog::info("[Config] bGameStageSelect: {} ({})", bGameStageSelect, sGameStageSelect);
     spdlog::info("[Config] bGameEnglishText: {}", bGameEnglishText);
     spdlog::info("[Config] bGameUnlockBriefing: {}", bGameUnlockBriefing);

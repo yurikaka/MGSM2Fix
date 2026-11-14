@@ -43,6 +43,7 @@ static bool SetExternalFixedBankMapping(unsigned first, bool linear) {
 template <Squirk Q>
 std::vector<std::pair<std::string, SQFUNCTION<Q>>> SQHook<Q>::CallTable = {
     {"util_load_script",                        SQCall_util_load_script},
+    {"_set_disk_patch",                         SQCall_set_disk_patch},
 };
 
 template <Squirk Q>
@@ -811,6 +812,45 @@ SQInteger SQHook<Q>::SQReturn_setSmoothing(HSQUIRRELVM<Q> v)
 
     if (M2Config::bScanline) SQEmuTask<Q>::SetScanline(M2Config::bScanline.value());
 
+    return 0;
+}
+
+// The collection rebuilds CD patches on every registration, but reuses RAM
+// binaries unless this array is empty. The filenames selected by
+// _get_patch_path depend on util_get_pad_type(), so returning to the collection
+// menu and changing controllers otherwise leaves Codec's static RAM labels stale.
+template <Squirk Q>
+SQInteger SQHook<Q>::SQCall_set_disk_patch(HSQUIRRELVM<Q> v)
+{
+    if (M2Fix::Game() != M2FixGame::MGS1 || !M2Config::bPatchesRefreshControllerRAM)
+        return 0;
+
+    Sqrat::RootTable<Q> root(v);
+    auto cached = root.GetSlot("s_ram_patch_binary");
+    auto getStyle = root.GetFunction("util_get_pad_type");
+    if (cached.GetType() != OT_ARRAY || getStyle.IsNull()) return 0;
+    auto style = getStyle.template Evaluate<SQInteger>();
+    if (!style || *style < 0 || *style >= 6) return 0;
+
+    // Keep the stamp with this VM, rather than in a process-wide static. A new
+    // VM, title or release must never inherit another one's cache identity.
+    Sqrat::RegistryTable<Q> registry(v);
+    const auto stamp = std::to_string(SQGlobals<Q>::GetTitle()) + "/"
+        + SQSystemData<Q>::SettingETC::GetVersion() + "/" + std::to_string(*style);
+    const auto key = "_m2fix_controller_ram_patch_cache";
+    auto previous = registry.GetSlot(key);
+    const bool same = previous.GetType() == OT_STRING && previous.template Cast<std::string>() == stamp;
+    Sqrat::Array<Q> patches = cached;
+    if (!same && patches.Length() != 0) {
+        const auto count = patches.Length();
+        // Do this BEFORE _set_disk_patch evaluates need_entry_ram_patch. Its
+        // original loader then picks the current files and applies them through
+        // the existing full/partial RAM filters. Ketchup::Process still runs at
+        // return, after official registration, restoring the PPF layer normally.
+        patches.Resize(0);
+        spdlog::info("[SQ] [Patch] Invalidated {} cached RAM patches for controller profile {}.", count, stamp);
+    }
+    registry.SetValue(key, stamp);
     return 0;
 }
 

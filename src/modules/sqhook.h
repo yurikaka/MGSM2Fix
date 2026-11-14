@@ -117,6 +117,7 @@ private:
     static SQInteger _SQ_MenuModeTitleMgsOptionScreen_is_highp(HSQUIRRELVM<Q> v);
     static SQInteger _SQ_MenuModePauseMgsOptionScreen_is_highp(HSQUIRRELVM<Q> v);
     static SQInteger _SQReturn_get_disk_path(HSQUIRRELVM<Q> v);
+    static SQInteger SQCall_set_disk_patch(HSQUIRRELVM<Q> v);
     static SQInteger _SQReturn_set_disk_patch(HSQUIRRELVM<Q> v);
 
     static SQInteger SQReturn_util_get_multimonitor_screen_bounds(HSQUIRRELVM<Q> v);

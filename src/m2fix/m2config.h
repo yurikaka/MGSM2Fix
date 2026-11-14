@@ -108,6 +108,7 @@ public:
     // otherwise see the wrong default.
     static inline M2BrightnessText eBrightnessText = M2BrightnessText::Fixed;
     static inline bool bPatchesPreserveConfiguration;
+    static inline bool bPatchesRefreshControllerRAM = true;
     static inline bool bShouldCheckForUpdates;
     static inline bool bConsoleUpdateNotifications;
     static inline bool bDisableWindowsFullscreenOptimization;
